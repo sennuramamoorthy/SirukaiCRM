@@ -6,14 +6,15 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Copy workspace manifests first — Docker layer cache: only re-run npm ci when lockfile changes
-COPY package.json package-lock.json ./
+# Copy workspace manifests first — Docker layer cache optimisation
+COPY package.json ./
 COPY server/package.json ./server/
 COPY client/package.json ./client/
 
 # Install ALL workspace dependencies (including devDeps for TypeScript + tsx)
 # This also compiles better-sqlite3 native addon against Node 20 Alpine ABI
-RUN npm ci
+# Using npm install (not npm ci) because no package-lock.json exists yet
+RUN npm install
 
 # Copy server TypeScript source
 COPY server/tsconfig.json ./server/
