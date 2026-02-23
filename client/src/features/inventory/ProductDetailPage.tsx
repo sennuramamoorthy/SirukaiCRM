@@ -21,8 +21,10 @@ export function ProductDetailPage() {
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role === 'admin' || user?.role === 'warehouse';
 
-  const [product, setProduct] = React.useState<Record<string, unknown> | null>(null);
-  const [transactions, setTransactions] = React.useState<Record<string, unknown>[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [product, setProduct] = React.useState<Record<string, any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [transactions, setTransactions] = React.useState<Record<string, any>[]>([]);
   const [editOpen, setEditOpen] = React.useState(false);
   const [adjustOpen, setAdjustOpen] = React.useState(false);
   const [adjType, setAdjType] = React.useState('adjustment');
