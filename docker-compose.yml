@@ -34,7 +34,7 @@ services:
       dockerfile: client/Dockerfile
     container_name: crm_client
     ports:
-      - "80:80"                       # App accessible at http://localhost
+      - "8000:8000"                   # App accessible at http://localhost:8000
     networks:
       - crm_network
     depends_on:

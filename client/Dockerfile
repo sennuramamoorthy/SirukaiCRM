@@ -37,6 +37,6 @@ COPY client/nginx.conf /etc/nginx/conf.d/app.conf
 # Copy built static files from builder
 COPY --from=builder /app/client/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 8000
 
 CMD ["nginx", "-g", "daemon off;"]
