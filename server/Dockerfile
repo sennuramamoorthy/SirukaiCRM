@@ -1,9 +1,7 @@
-# ── Stage 1: builder ──────────────────────────────────────────────────────────
+# ── Stage 1: builder ──────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-# Native build tools required by better-sqlite3 (compiled via node-gyp)
-RUN apk add --no-cache python3 make g++
-
+# pg is pure JavaScript — no native build tools needed (unlike better-sqlite3)
 WORKDIR /app
 
 # Copy workspace manifests first — Docker layer cache optimisation
@@ -12,8 +10,6 @@ COPY server/package.json ./server/
 COPY client/package.json ./client/
 
 # Install ALL workspace dependencies (including devDeps for TypeScript + tsx)
-# This also compiles better-sqlite3 native addon against Node 20 Alpine ABI
-# Using npm install (not npm ci) because no package-lock.json exists yet
 RUN npm install
 
 # Copy server TypeScript source
@@ -24,7 +20,7 @@ COPY server/src ./server/src
 RUN npm run build --workspace=server
 
 
-# ── Stage 2: production ───────────────────────────────────────────────────────
+# ── Stage 2: production ───────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS production
 
 WORKDIR /app
@@ -35,17 +31,15 @@ COPY server/package.json ./server/
 COPY client/package.json ./client/
 
 # Copy pre-built node_modules from builder
-# better-sqlite3 .node binary is already compiled for Node 20 Linux Alpine — no rebuild needed
-# node_modules includes tsx (devDep) so "npm run seed" works at runtime
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copy compiled Express server
 COPY --from=builder /app/server/dist ./server/dist
 
-# Copy SQL migration files — database.ts reads these at startup to auto-run migrations
+# Copy SQL migration files — runMigrations() reads these at startup
 COPY --from=builder /app/server/src/db/migrations ./server/src/db/migrations
 
-# Copy seed script + config source for: docker compose run --rm server npm run seed
+# Copy seed script for: docker compose run --rm server npm run seed
 COPY --from=builder /app/server/src/db/seed.ts ./server/src/db/seed.ts
 COPY --from=builder /app/server/src/config ./server/src/config
 
@@ -54,7 +48,7 @@ WORKDIR /app/server
 EXPOSE 3001
 
 # Health check uses the GET /health endpoint defined in app.ts
-HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
   CMD wget -qO- http://localhost:3001/health || exit 1
 
 CMD ["node", "dist/index.js"]

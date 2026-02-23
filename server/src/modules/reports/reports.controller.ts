@@ -2,34 +2,34 @@ import { Request, Response } from 'express';
 import * as reportsService from './reports.service';
 import { sendSuccess } from '../../utils/response';
 
-export function getSales(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getSalesReport(req.query as Record<string, string>));
+export async function getSales(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getSalesReport(req.query as Record<string, string>));
 }
 
-export function getRevenue(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getRevenueReport(req.query as Record<string, string>));
+export async function getRevenue(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getRevenueReport(req.query as Record<string, string>));
 }
 
-export function getTopProducts(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getTopProducts(req.query as Record<string, string>));
+export async function getTopProducts(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getTopProducts(req.query as Record<string, string>));
 }
 
-export function getTopCustomers(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getTopCustomers(req.query as Record<string, string>));
+export async function getTopCustomers(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getTopCustomers(req.query as Record<string, string>));
 }
 
-export function getInventoryValuation(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getInventoryValuation());
+export async function getInventoryValuation(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getInventoryValuation());
 }
 
-export function getOrderStatusBreakdown(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getOrderStatusBreakdown());
+export async function getOrderStatusBreakdown(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getOrderStatusBreakdown());
 }
 
-export function getInvoiceAging(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getInvoiceAging());
+export async function getInvoiceAging(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getInvoiceAging());
 }
 
-export function getDashboardKpis(req: Request, res: Response): void {
-  sendSuccess(res, reportsService.getDashboardKpis());
+export async function getDashboardKpis(req: Request, res: Response): Promise<void> {
+  sendSuccess(res, await reportsService.getDashboardKpis());
 }

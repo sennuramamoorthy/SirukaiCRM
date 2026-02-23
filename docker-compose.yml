@@ -2,32 +2,51 @@ version: '3.8'
 
 services:
 
-  # ── Express API server ───────────────────────────────────────────────────────
+  # ── PostgreSQL database ────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm_postgres
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm_password
+      POSTGRES_DB: crmdb
+    volumes:
+      - crm_pg_data:/var/lib/postgresql/data
+    networks:
+      - crm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crmdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Express API server ───────────────────────────────────────────────────────────────────────────
   server:
     build:
-      context: .                      # monorepo root (both Dockerfiles need access to all workspace files)
+      context: .                      # monorepo root
       dockerfile: server/Dockerfile
     container_name: crm_server
     env_file:
-      - .env.docker                   # injects PORT, JWT_SECRET, NODE_ENV, CORS_ORIGIN
-    volumes:
-      # Named volume persists the SQLite database file across container restarts.
-      # Path matches database.ts: path.join(__dirname, '../../data') → /app/server/data
-      - crm_sqlite_data:/app/server/data
+      - .env.docker                   # injects PORT, JWT_SECRET, NODE_ENV, CORS_ORIGIN, DATABASE_URL
     networks:
       - crm_network
+    depends_on:
+      postgres:
+        condition: service_healthy    # Wait for PostgreSQL to be ready
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
     restart: unless-stopped
     # Uncomment to expose the API directly for debugging (bypasses nginx):
     # ports:
     #   - "3001:3001"
 
-  # ── React frontend + nginx reverse proxy ────────────────────────────────────
+  # ── React frontend + nginx reverse proxy ────────────────────────────────────────────
   client:
     build:
       context: .
@@ -43,8 +62,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Named volume for SQLite database persistence
-  crm_sqlite_data:
+  crm_pg_data:
     driver: local
 
 networks:

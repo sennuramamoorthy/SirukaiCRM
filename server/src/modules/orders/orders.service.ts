@@ -1,4 +1,4 @@
-import db from '../../config/database';
+import pool from '../../config/database';
 import { parsePagination, paginationMeta } from '../../utils/pagination';
 import { nextOrderNumber } from '../../utils/sequencer';
 import { reserveStock, releaseReservation, deductStock } from '../inventory/inventory.service';
@@ -22,77 +22,92 @@ function calcOrderTotals(items: ReturnType<typeof calcLineTotals>, discountCents
   return { subtotal_cents: subtotal, discount_cents: discountCents, tax_cents: taxCents, total_cents: subtotal - discountCents + taxCents };
 }
 
-export function listOrders(query: Record<string, string | undefined>) {
+export async function listOrders(query: Record<string, string | undefined>) {
   const { page, limit, offset } = parsePagination(query);
   let where = 'WHERE 1=1';
   const params: (string | number)[] = [];
+  let idx = 1;
 
-  if (query.status) { where += ' AND o.status = ?'; params.push(query.status); }
-  if (query.customer_id) { where += ' AND o.customer_id = ?'; params.push(Number(query.customer_id)); }
+  if (query.status) { where += ` AND o.status = $${idx}`; params.push(query.status); idx++; }
+  if (query.customer_id) { where += ` AND o.customer_id = $${idx}`; params.push(Number(query.customer_id)); idx++; }
   if (query.search) {
-    where += ' AND (o.order_number LIKE ? OR c.name LIKE ?)';
+    where += ` AND (o.order_number ILIKE $${idx} OR c.name ILIKE $${idx + 1})`;
     params.push(`%${query.search}%`, `%${query.search}%`);
+    idx += 2;
   }
 
-  const total = (db.prepare(
-    `SELECT COUNT(*) as cnt FROM orders o JOIN customers c ON c.id = o.customer_id ${where}`
-  ).get(...params) as { cnt: number }).cnt;
+  const countResult = await pool.query(
+    `SELECT COUNT(*) as cnt FROM orders o JOIN customers c ON c.id = o.customer_id ${where}`,
+    params
+  );
+  const total = parseInt(countResult.rows[0].cnt, 10);
 
-  const rows = db.prepare(
+  const { rows } = await pool.query(
     `SELECT o.*, c.name as customer_name,
             (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
      FROM orders o JOIN customers c ON c.id = o.customer_id
-     ${where} ORDER BY o.created_at DESC LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset);
+     ${where} ORDER BY o.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
+    [...params, limit, offset]
+  );
 
   return { rows, meta: paginationMeta(total, page, limit) };
 }
 
-export function getOrderById(id: number) {
-  const order = db.prepare(
+export async function getOrderById(id: number) {
+  const { rows: orderRows } = await pool.query(
     `SELECT o.*, c.name as customer_name, c.email as customer_email
-     FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ?`
-  ).get(id);
-  if (!order) return null;
+     FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1`,
+    [id]
+  );
+  if (!orderRows[0]) return null;
 
-  const items = db.prepare(
+  const { rows: items } = await pool.query(
     `SELECT oi.*, p.name as product_name, p.sku
      FROM order_items oi JOIN products p ON p.id = oi.product_id
-     WHERE oi.order_id = ?`
-  ).all(id);
+     WHERE oi.order_id = $1`,
+    [id]
+  );
 
-  return { ...(order as object), items };
+  return { ...orderRows[0], items };
 }
 
-export function createOrder(
+export async function createOrder(
   data: { customer_id: number; shipping_address?: string | null; notes?: string | null; discount_cents: number; tax_cents: number; items: OrderItem[] },
   userId: number
 ) {
-  return db.transaction(() => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
     const itemsWithTotals = calcLineTotals(data.items);
     const totals = calcOrderTotals(itemsWithTotals, data.discount_cents, data.tax_cents);
-    const orderNumber = nextOrderNumber();
+    const orderNumber = await nextOrderNumber();
 
-    const result = db.prepare(
+    const { rows } = await client.query(
       `INSERT INTO orders (order_number, customer_id, assigned_to, status, shipping_address, notes,
        subtotal_cents, discount_cents, tax_cents, total_cents)
-       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`
-    ).run(
-      orderNumber, data.customer_id, userId, data.shipping_address ?? null, data.notes ?? null,
-      totals.subtotal_cents, totals.discount_cents, totals.tax_cents, totals.total_cents
-    ) as { lastInsertRowid: number };
-
-    const orderId = result.lastInsertRowid;
+       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [orderNumber, data.customer_id, userId, data.shipping_address ?? null, data.notes ?? null,
+       totals.subtotal_cents, totals.discount_cents, totals.tax_cents, totals.total_cents]
+    );
+    const orderId = rows[0].id;
 
     for (const item of itemsWithTotals) {
-      db.prepare(
+      await client.query(
         `INSERT INTO order_items (order_id, product_id, quantity, unit_price_cents, discount_pct, line_total_cents)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(orderId, item.product_id, item.quantity, item.unit_price_cents, item.discount_pct, item.line_total_cents);
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [orderId, item.product_id, item.quantity, item.unit_price_cents, item.discount_pct, item.line_total_cents]
+      );
     }
 
+    await client.query('COMMIT');
     return getOrderById(orderId);
-  })();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -104,11 +119,13 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   cancelled: [],
 };
 
-export function updateOrderStatus(orderId: number, newStatus: string, userId: number) {
-  return db.transaction(() => {
-    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as {
-      id: number; status: string; customer_id: number;
-    } | undefined;
+export async function updateOrderStatus(orderId: number, newStatus: string, userId: number) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: orderRows } = await client.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    const order = orderRows[0];
     if (!order) throw new Error('Order not found');
 
     const allowed = VALID_TRANSITIONS[order.status] || [];
@@ -117,77 +134,114 @@ export function updateOrderStatus(orderId: number, newStatus: string, userId: nu
     }
 
     const now = Date.now();
-    const updates: Record<string, number | string> = { status: newStatus, updated_at: now };
+    const setClauses: string[] = ['status = $1', 'updated_at = $2'];
+    const updateParams: (string | number)[] = [newStatus, now];
+    let paramIdx = 3;
 
     if (newStatus === 'confirmed') {
-      updates.ordered_at = now;
-      // Reserve inventory
-      const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(orderId) as { product_id: number; quantity: number }[];
+      setClauses.push(`ordered_at = $${paramIdx}`);
+      updateParams.push(now);
+      paramIdx++;
+
+      const { rows: items } = await client.query(
+        'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+        [orderId]
+      );
       for (const item of items) {
-        reserveStock(item.product_id, item.quantity, orderId, userId);
+        await reserveStock(client, item.product_id, item.quantity, orderId, userId);
       }
     }
 
     if (newStatus === 'shipped') {
-      updates.shipped_at = now;
-      // Deduct inventory
-      const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(orderId) as { product_id: number; quantity: number }[];
+      setClauses.push(`shipped_at = $${paramIdx}`);
+      updateParams.push(now);
+      paramIdx++;
+
+      const { rows: items } = await client.query(
+        'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+        [orderId]
+      );
       for (const item of items) {
-        deductStock(item.product_id, item.quantity, orderId, userId);
+        await deductStock(client, item.product_id, item.quantity, orderId, userId);
       }
     }
 
     if (newStatus === 'delivered') {
-      updates.delivered_at = now;
+      setClauses.push(`delivered_at = $${paramIdx}`);
+      updateParams.push(now);
+      paramIdx++;
     }
 
     if (newStatus === 'cancelled') {
-      updates.cancelled_at = now;
+      setClauses.push(`cancelled_at = $${paramIdx}`);
+      updateParams.push(now);
+      paramIdx++;
+
       if (['confirmed', 'processing'].includes(order.status)) {
-        // Release inventory reservations
-        const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(orderId) as { product_id: number; quantity: number }[];
+        const { rows: items } = await client.query(
+          'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+          [orderId]
+        );
         for (const item of items) {
-          releaseReservation(item.product_id, item.quantity, orderId, userId);
+          await releaseReservation(client, item.product_id, item.quantity, orderId, userId);
         }
       }
     }
 
-    const setClauses = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
-    db.prepare(`UPDATE orders SET ${setClauses} WHERE id = ?`).run(...Object.values(updates), orderId);
+    updateParams.push(orderId);
+    await client.query(
+      `UPDATE orders SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
+      updateParams
+    );
 
+    await client.query('COMMIT');
     return getOrderById(orderId);
-  })();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-export function updateOrder(id: number, data: { shipping_address?: string | null; notes?: string | null; discount_cents?: number; tax_cents?: number }) {
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as { status: string } | undefined;
-  if (!order) throw new Error('Order not found');
-  if (order.status !== 'draft') throw new Error('Only draft orders can be edited');
+export async function updateOrder(id: number, data: { shipping_address?: string | null; notes?: string | null; discount_cents?: number; tax_cents?: number }) {
+  const { rows: orderRows } = await pool.query('SELECT status FROM orders WHERE id = $1', [id]);
+  if (!orderRows[0]) throw new Error('Order not found');
+  if (orderRows[0].status !== 'draft') throw new Error('Only draft orders can be edited');
 
   const now = Date.now();
-  db.prepare(
-    `UPDATE orders SET shipping_address=@shipping_address, notes=@notes,
-     discount_cents=COALESCE(@discount_cents, discount_cents),
-     tax_cents=COALESCE(@tax_cents, tax_cents), updated_at=@now WHERE id = @id`
-  ).run({ ...data, now, id });
+  await pool.query(
+    `UPDATE orders SET shipping_address=$1, notes=$2,
+     discount_cents=COALESCE($3, discount_cents),
+     tax_cents=COALESCE($4, tax_cents), updated_at=$5 WHERE id = $6`,
+    [data.shipping_address ?? null, data.notes ?? null, data.discount_cents ?? null, data.tax_cents ?? null, now, id]
+  );
 
-  // Recalculate totals
-  recalcOrderTotals(id);
+  await recalcOrderTotals(id);
   return getOrderById(id);
 }
 
-function recalcOrderTotals(orderId: number) {
-  const items = db.prepare('SELECT line_total_cents FROM order_items WHERE order_id = ?').all(orderId) as { line_total_cents: number }[];
-  const order = db.prepare('SELECT discount_cents, tax_cents FROM orders WHERE id = ?').get(orderId) as { discount_cents: number; tax_cents: number };
-  const subtotal = items.reduce((s, i) => s + i.line_total_cents, 0);
-  const total = subtotal - order.discount_cents + order.tax_cents;
-  db.prepare('UPDATE orders SET subtotal_cents = ?, total_cents = ?, updated_at = ? WHERE id = ?')
-    .run(subtotal, total, Date.now(), orderId);
+async function recalcOrderTotals(orderId: number) {
+  const { rows: items } = await pool.query(
+    'SELECT line_total_cents FROM order_items WHERE order_id = $1',
+    [orderId]
+  );
+  const { rows: orderRows } = await pool.query(
+    'SELECT discount_cents, tax_cents FROM orders WHERE id = $1',
+    [orderId]
+  );
+  const order = orderRows[0];
+  const subtotal = items.reduce((s: number, i: { line_total_cents: string }) => s + Number(i.line_total_cents), 0);
+  const total = subtotal - Number(order.discount_cents) + Number(order.tax_cents);
+  await pool.query(
+    'UPDATE orders SET subtotal_cents = $1, total_cents = $2, updated_at = $3 WHERE id = $4',
+    [subtotal, total, Date.now(), orderId]
+  );
 }
 
-export function deleteOrder(id: number) {
-  const order = db.prepare('SELECT status FROM orders WHERE id = ?').get(id) as { status: string } | undefined;
-  if (!order) throw new Error('Order not found');
-  if (order.status !== 'draft') throw new Error('Only draft orders can be deleted');
-  db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+export async function deleteOrder(id: number) {
+  const { rows } = await pool.query('SELECT status FROM orders WHERE id = $1', [id]);
+  if (!rows[0]) throw new Error('Order not found');
+  if (rows[0].status !== 'draft') throw new Error('Only draft orders can be deleted');
+  await pool.query('DELETE FROM orders WHERE id = $1', [id]);
 }
