@@ -1,4 +1,4 @@
-import db from '../../config/database';
+import pool from '../../config/database';
 import bcrypt from 'bcryptjs';
 import { signToken } from '../../utils/jwt';
 
@@ -8,15 +8,17 @@ interface UserRow {
   email: string;
   password_hash: string;
   role: 'admin' | 'sales' | 'warehouse';
-  is_active: number;
+  is_active: boolean;
 }
 
-export function login(email: string, password: string) {
-  const user = db
-    .prepare('SELECT * FROM users WHERE email = ? AND is_active = 1')
-    .get(email) as UserRow | undefined;
+export async function login(email: string, password: string) {
+  const { rows } = await pool.query<UserRow>(
+    'SELECT * FROM users WHERE email = $1 AND is_active = TRUE',
+    [email]
+  );
+  const user = rows[0];
 
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
     return null;
   }
 
@@ -27,21 +29,22 @@ export function login(email: string, password: string) {
   };
 }
 
-export function getMe(userId: number) {
-  return db
-    .prepare('SELECT id, name, email, role, created_at FROM users WHERE id = ?')
-    .get(userId) as UserRow | undefined;
+export async function getMe(userId: number) {
+  const { rows } = await pool.query(
+    'SELECT id, name, email, role, created_at FROM users WHERE id = $1',
+    [userId]
+  );
+  return rows[0] || null;
 }
 
-export function updateMe(userId: number, data: { name?: string; password?: string }) {
+export async function updateMe(userId: number, data: { name?: string; password?: string }) {
+  const now = Date.now();
   if (data.password) {
-    const hash = bcrypt.hashSync(data.password, 10);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
-      .run(hash, Date.now(), userId);
+    const hash = await bcrypt.hash(data.password, 10);
+    await pool.query('UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3', [hash, now, userId]);
   }
   if (data.name) {
-    db.prepare('UPDATE users SET name = ?, updated_at = ? WHERE id = ?')
-      .run(data.name, Date.now(), userId);
+    await pool.query('UPDATE users SET name = $1, updated_at = $2 WHERE id = $3', [data.name, now, userId]);
   }
   return getMe(userId);
 }

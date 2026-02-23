@@ -4,12 +4,13 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy workspace manifests first — Docker layer cache optimisation
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY client/package.json ./client/
 COPY server/package.json ./server/
 
 # Install all workspace dependencies
-RUN npm ci
+# Using npm install (not npm ci) because no package-lock.json exists yet
+RUN npm install
 
 # Copy client source files
 COPY client/tsconfig.json ./client/
@@ -36,6 +37,6 @@ COPY client/nginx.conf /etc/nginx/conf.d/app.conf
 # Copy built static files from builder
 COPY --from=builder /app/client/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 8000
 
 CMD ["nginx", "-g", "daemon off;"]

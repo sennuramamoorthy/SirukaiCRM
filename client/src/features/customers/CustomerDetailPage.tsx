@@ -13,9 +13,12 @@ import { formatCurrency, formatDate } from '@/lib/formatters';
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [customer, setCustomer] = React.useState<Record<string, unknown> | null>(null);
-  const [orders, setOrders] = React.useState<Record<string, unknown>[]>([]);
-  const [invoices, setInvoices] = React.useState<Record<string, unknown>[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [customer, setCustomer] = React.useState<Record<string, any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [orders, setOrders] = React.useState<Record<string, any>[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [invoices, setInvoices] = React.useState<Record<string, any>[]>([]);
   const [editOpen, setEditOpen] = React.useState(false);
 
   async function load() {

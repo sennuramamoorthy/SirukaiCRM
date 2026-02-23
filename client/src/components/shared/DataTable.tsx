@@ -5,7 +5,8 @@ import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 export interface Column<T> {
   key: string;
   header: string;
-  accessor?: keyof T | ((row: T) => React.ReactNode);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  accessor?: keyof T | ((row: any) => React.ReactNode);
   sortable?: boolean;
   className?: string;
 }
@@ -19,7 +20,7 @@ interface DataTableProps<T> {
   loading?: boolean;
 }
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   columns,
   data,
   keyField = 'id' as keyof T,
@@ -42,8 +43,8 @@ export function DataTable<T extends Record<string, unknown>>({
   const sortedData = React.useMemo(() => {
     if (!sortKey) return data;
     return [...data].sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
+      const av = (a as Record<string, unknown>)[sortKey];
+      const bv = (b as Record<string, unknown>)[sortKey];
       if (av == null) return 1;
       if (bv == null) return -1;
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;

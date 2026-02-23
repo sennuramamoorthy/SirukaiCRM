@@ -151,7 +151,7 @@ export function InventoryPage() {
         </TabsList>
         <TabsContent value={tab}>
           <DataTable
-            columns={columns as never}
+            columns={columns}
             data={displayedProducts}
             loading={loading}
             onRowClick={(r) => navigate(`/inventory/${r.id}`)}

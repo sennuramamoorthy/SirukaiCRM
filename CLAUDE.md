@@ -15,7 +15,7 @@ Full-stack CRM application for managing customer orders, invoices, inventory, re
 | Charts | Recharts |
 | PDF | @react-pdf/renderer (client preview + server PDF stream) |
 | Backend | Node.js + Express 4 + TypeScript |
-| Database | SQLite via better-sqlite3 (WAL mode) |
+| Database | PostgreSQL 16 via pg (node-postgres) |
 | Auth | JWT HS256 (8h expiry) + RBAC middleware |
 | Monorepo | npm workspaces |
 
@@ -86,7 +86,7 @@ cd server && npx ts-node src/db/seed.ts
 ## Server Configuration
 
 - **Port:** 3001 (configured via `PORT` env var)
-- **Database:** `server/data/crm.db` (SQLite file, created automatically)
+- **Database:** PostgreSQL — connection via `DATABASE_URL` env var
 - **JWT Secret:** `JWT_SECRET` env var (required)
 
 ## Environment Variables
@@ -96,21 +96,32 @@ Create `server/.env`:
 PORT=3001
 JWT_SECRET=your-super-secret-key-change-in-production
 NODE_ENV=development
+DATABASE_URL=postgres://crm:crm_password@localhost:5432/crmdb
+```
+
+For Docker, use `.env.docker` (already configured). For local dev, run PostgreSQL locally or via Docker:
+```bash
+docker run -d --name crm_pg -e POSTGRES_USER=crm -e POSTGRES_PASSWORD=crm_password -e POSTGRES_DB=crmdb -p 5432:5432 postgres:16-alpine
 ```
 
 ## Architecture Conventions
 
 ### Backend (Router → Controller → Service → DB)
 - **Router**: Express Router + auth/RBAC middleware. No logic.
-- **Controller**: Parse request → call service → send response. No business logic.
-- **Service**: All business logic + prepared SQL statements via better-sqlite3.
+- **Controller**: Parse request → `await` service → send response. No business logic. All controllers are `async`.
+- **Service**: All business logic + async `pool.query()` / `client.query()` calls via `pg`.
 - **Schema**: Zod schemas for request body validation (used in validate middleware).
 
 ### Database Conventions
-- All **monetary values** stored as **INTEGER cents** (e.g., $12.50 → `1250`)
-- All **timestamps** stored as **INTEGER Unix milliseconds** (`Date.now()`)
-- All **soft deletes** via `deleted_at INTEGER` column (NULL = active)
-- Foreign keys enforced via `PRAGMA foreign_keys = ON`
+- All **monetary values** stored as **BIGINT cents** (e.g., $12.50 → `1250`)
+- All **timestamps** stored as **BIGINT Unix milliseconds** (`Date.now()`)
+- All **soft deletes** via `deleted_at BIGINT` column (NULL = active)
+- Parameterized queries use `$1, $2, $3` positional placeholders (pg style)
+- Transactions: `client = await pool.connect()`, `BEGIN/COMMIT/ROLLBACK`, `client.release()` in finally
+- `RETURNING id` used after INSERT to get new row id (no `lastInsertRowid`)
+- `ON CONFLICT DO NOTHING` replaces `INSERT OR IGNORE`
+- `ON CONFLICT ... DO UPDATE SET` replaces `INSERT OR REPLACE`
+- `ILIKE` used for case-insensitive search (replaces SQLite `LIKE`)
 
 ### Frontend Conventions
 - Currency display: always use `formatCurrency(cents)` from `lib/formatters.ts`
@@ -129,7 +140,29 @@ NODE_ENV=development
 
 ## Auto-Number Sequences
 
-Documents use year-scoped sequences: `ORD-2026-00001`, `INV-2026-00001`, `PO-2026-00001`, `SHP-2026-00001`. Generated in service layer inside a SQLite transaction.
+Documents use year-scoped sequences: `ORD-2026-00001`, `INV-2026-00001`, `PO-2026-00001`, `SHP-2026-00001`. Generated in service layer using async `pool.query()` with `SUBSTRING()` and `MAX()`.
+
+## Docker Usage
+
+```bash
+# Build and start all services (PostgreSQL + server + client)
+docker compose up -d --build
+
+# Seed the database (run once after first build)
+docker compose run --rm server npm run seed
+
+# App is available at http://localhost:8000
+# Login: admin@crm.local / Admin123!
+
+# View logs
+docker compose logs -f
+
+# Stop (preserves data)
+docker compose down
+
+# Stop and delete all data
+docker compose down -v
+```
 
 ## Default Seed Credentials
 
