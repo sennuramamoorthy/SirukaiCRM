@@ -9,7 +9,7 @@ export async function list(req: Request, res: Response): Promise<void> {
 
 export async function getById(req: Request, res: Response): Promise<void> {
   const invoice = await invoicesService.getInvoiceById(Number(req.params.id));
-  if (\!invoice) { sendError(res, 'Invoice not found', 404); return; }
+  if (!invoice) { sendError(res, 'Invoice not found', 404); return; }
   sendSuccess(res, invoice);
 }
 

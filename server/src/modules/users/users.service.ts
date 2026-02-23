@@ -25,10 +25,14 @@ export async function createUser(data: { name: string; email: string; password: 
   return getUserById(rows[0].id);
 }
 
-export async function updateUser(id: number, data: { name?: string; email?: string; role?: string; is_active?: boolean }) {
+export async function updateUser(id: number, data: { name?: string; email?: string; password?: string; role?: string; is_active?: boolean }) {
   const now = Date.now();
   if (data.name !== undefined) await pool.query('UPDATE users SET name = $1, updated_at = $2 WHERE id = $3', [data.name, now, id]);
   if (data.email !== undefined) await pool.query('UPDATE users SET email = $1, updated_at = $2 WHERE id = $3', [data.email, now, id]);
+  if (data.password !== undefined && data.password !== '') {
+    const hash = await bcrypt.hash(data.password, 10);
+    await pool.query('UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3', [hash, now, id]);
+  }
   if (data.role !== undefined) await pool.query('UPDATE users SET role = $1, updated_at = $2 WHERE id = $3', [data.role, now, id]);
   if (data.is_active !== undefined) await pool.query('UPDATE users SET is_active = $1, updated_at = $2 WHERE id = $3', [data.is_active, now, id]);
   return getUserById(id);

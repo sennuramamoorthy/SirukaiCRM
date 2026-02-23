@@ -8,7 +8,7 @@ export async function list(req: Request, res: Response): Promise<void> {
 
 export async function getById(req: Request, res: Response): Promise<void> {
   const user = await usersService.getUserById(Number(req.params.id));
-  if (\!user) { sendError(res, 'User not found', 404); return; }
+  if (!user) { sendError(res, 'User not found', 404); return; }
   sendSuccess(res, user);
 }
 
@@ -17,7 +17,8 @@ export async function create(req: Request, res: Response): Promise<void> {
     const user = await usersService.createUser(req.body);
     sendSuccess(res, user, 'User created', 201);
   } catch (err: unknown) {
-    if (err instanceof Error && (err.message.includes('UNIQUE') || err.message.includes('unique'))) {
+    // PostgreSQL unique violation error code
+    if ((err as { code?: string }).code === '23505') {
       sendError(res, 'Email already in use', 409);
       return;
     }
@@ -26,8 +27,17 @@ export async function create(req: Request, res: Response): Promise<void> {
 }
 
 export async function update(req: Request, res: Response): Promise<void> {
-  const user = await usersService.updateUser(Number(req.params.id), req.body);
-  sendSuccess(res, user, 'User updated');
+  try {
+    const user = await usersService.updateUser(Number(req.params.id), req.body);
+    sendSuccess(res, user, 'User updated');
+  } catch (err: unknown) {
+    // PostgreSQL unique violation error code
+    if ((err as { code?: string }).code === '23505') {
+      sendError(res, 'Email already in use', 409);
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function remove(req: Request, res: Response): Promise<void> {

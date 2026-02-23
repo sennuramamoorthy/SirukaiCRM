@@ -3,14 +3,15 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy workspace manifests first — Docker layer cache optimisation
+# Copy workspace manifests + lockfile first — Docker layer cache optimisation
+# npm ci uses package-lock.json for fast, deterministic installs (no registry re-resolution)
 COPY package.json ./
+COPY package-lock.json ./
 COPY client/package.json ./client/
 COPY server/package.json ./server/
 
 # Install all workspace dependencies
-# Using npm install (not npm ci) because no package-lock.json exists yet
-RUN npm install
+RUN npm ci
 
 # Copy client source files
 COPY client/tsconfig.json ./client/

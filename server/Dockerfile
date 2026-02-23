@@ -4,13 +4,15 @@ FROM node:20-alpine AS builder
 # pg is pure JavaScript — no native build tools needed (unlike better-sqlite3)
 WORKDIR /app
 
-# Copy workspace manifests first — Docker layer cache optimisation
+# Copy workspace manifests + lockfile first — Docker layer cache optimisation
+# npm ci uses package-lock.json for fast, deterministic installs (no registry re-resolution)
 COPY package.json ./
+COPY package-lock.json ./
 COPY server/package.json ./server/
 COPY client/package.json ./client/
 
 # Install ALL workspace dependencies (including devDeps for TypeScript + tsx)
-RUN npm install
+RUN npm ci
 
 # Copy server TypeScript source
 COPY server/tsconfig.json ./server/
@@ -36,8 +38,8 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy compiled Express server
 COPY --from=builder /app/server/dist ./server/dist
 
-# Copy SQL migration files — runMigrations() reads these at startup
-COPY --from=builder /app/server/src/db/migrations ./server/src/db/migrations
+# Copy SQL migration files into dist/ — runMigrations() resolves via __dirname → dist/config/../db/migrations
+COPY --from=builder /app/server/src/db/migrations ./server/dist/db/migrations
 
 # Copy seed script for: docker compose run --rm server npm run seed
 COPY --from=builder /app/server/src/db/seed.ts ./server/src/db/seed.ts

@@ -1,32 +1,34 @@
-import db from '../config/database';
+import pool from '../config/database';
 
 const year = new Date().getFullYear();
 
-function nextSequence(table: string, column: string, prefix: string): string {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(MAX(CAST(SUBSTR(${column}, LENGTH(@prefix) + 1) AS INTEGER)), 0) + 1 AS next
-       FROM ${table}
-       WHERE ${column} LIKE @pattern`
-    )
-    .get({ prefix: `${prefix}${year}-`, pattern: `${prefix}${year}-%` }) as { next: number };
+async function nextSequence(table: string, column: string, prefix: string): Promise<string> {
+  const pattern = `${prefix}${year}-%`;
+  const fullPrefix = `${prefix}${year}-`;
 
-  const seq = String(row.next).padStart(5, '0');
-  return `${prefix}${year}-${seq}`;
+  const { rows } = await pool.query<{ next: string }>(
+    `SELECT COALESCE(MAX(CAST(SUBSTRING(${column}, $1) AS INTEGER)), 0) + 1 AS next
+     FROM ${table}
+     WHERE ${column} ILIKE $2`,
+    [fullPrefix.length + 1, pattern]
+  );
+
+  const seq = String(rows[0].next).padStart(5, '0');
+  return `${fullPrefix}${seq}`;
 }
 
-export function nextOrderNumber(): string {
+export async function nextOrderNumber(): Promise<string> {
   return nextSequence('orders', 'order_number', 'ORD-');
 }
 
-export function nextInvoiceNumber(): string {
+export async function nextInvoiceNumber(): Promise<string> {
   return nextSequence('invoices', 'invoice_number', 'INV-');
 }
 
-export function nextPoNumber(): string {
+export async function nextPoNumber(): Promise<string> {
   return nextSequence('purchase_orders', 'po_number', 'PO-');
 }
 
-export function nextShipmentNumber(): string {
+export async function nextShipmentNumber(): Promise<string> {
   return nextSequence('shipments', 'shipment_number', 'SHP-');
 }
