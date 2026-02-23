@@ -59,7 +59,7 @@ export function InvoicesPage() {
         {STATUSES.map((s) => (
           <TabsContent key={s} value={s}>
             <DataTable
-              columns={columns as never}
+              columns={columns}
               data={invoices}
               loading={loading}
               onRowClick={(r) => navigate(`/invoices/${r.id}`)}

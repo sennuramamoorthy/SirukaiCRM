@@ -107,7 +107,7 @@ export function CustomersPage() {
       </div>
 
       <DataTable
-        columns={columns as never}
+        columns={columns}
         data={customers}
         loading={loading}
         onRowClick={(r) => navigate(`/customers/${r.id}`)}

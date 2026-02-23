@@ -5,7 +5,8 @@ import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 export interface Column<T> {
   key: string;
   header: string;
-  accessor?: keyof T | ((row: T) => React.ReactNode);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  accessor?: keyof T | ((row: any) => React.ReactNode);
   sortable?: boolean;
   className?: string;
 }

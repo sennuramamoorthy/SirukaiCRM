@@ -93,7 +93,7 @@ export function OrdersPage() {
         {STATUSES.map((s) => (
           <TabsContent key={s} value={s}>
             <DataTable
-              columns={columns as never}
+              columns={columns}
               data={orders}
               loading={loading}
               onRowClick={(r) => navigate(`/orders/${r.id}`)}
