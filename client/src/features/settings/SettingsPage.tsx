@@ -14,10 +14,13 @@ import api from '@/api/axios';
 import { toast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/formatters';
 
+// Single schema: password is always a string (min 6 or empty string).
+// The create-mode requirement (non-empty) is enforced in onSubmit, not Zod,
+// to avoid react-hook-form resolver-switching issues.
 const userSchema = z.object({
   name: z.string().min(1, 'Name required'),
-  email: z.string().email(),
-  password: z.string().min(6, 'Min 6 chars').optional().or(z.literal('')),
+  email: z.string().email('Valid email required'),
+  password: z.string().max(100).optional().or(z.literal('')),
   role: z.enum(['admin', 'sales', 'warehouse']),
 });
 type UserFormData = z.infer<typeof userSchema>;
@@ -27,25 +30,21 @@ interface User {
   name: string;
   email: string;
   role: string;
-  is_active: number;
+  is_active: boolean;
   created_at: number;
 }
 
-export function SettingsPage() {
-  const [users, setUsers] = React.useState<User[]>([]);
-  const [formOpen, setFormOpen] = React.useState(false);
-  const [editUser, setEditUser] = React.useState<User | null>(null);
+interface UserFormProps {
+  editUser: User | null;
+  onSuccess: () => void;
+  onCancel: () => void;
+}
 
-  async function loadUsers() {
-    const res = await api.get('/users');
-    setUsers(res.data.data || []);
-  }
-
-  React.useEffect(() => { loadUsers(); }, []);
-
-  const { register, handleSubmit, setValue, reset, formState: { errors, isSubmitting } } = useForm<UserFormData>({
+// Isolated form component — remounts cleanly on each open via `key` prop.
+function UserForm({ editUser, onSuccess, onCancel }: UserFormProps) {
+  const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<UserFormData>({
     resolver: zodResolver(userSchema),
-    values: {
+    defaultValues: {
       name: editUser?.name ?? '',
       email: editUser?.email ?? '',
       password: '',
@@ -54,6 +53,12 @@ export function SettingsPage() {
   });
 
   async function onSubmit(data: UserFormData) {
+    // Enforce password required for new users at submit time
+    if (!editUser && (!data.password || data.password.length < 6)) {
+      toast({ title: 'Password must be at least 6 characters', variant: 'destructive' });
+      return;
+    }
+
     try {
       if (editUser) {
         const payload: Record<string, string> = { name: data.name, email: data.email, role: data.role };
@@ -61,22 +66,101 @@ export function SettingsPage() {
         await api.put(`/users/${editUser.id}`, payload);
         toast({ title: 'User updated' });
       } else {
-        await api.post('/users', data);
+        await api.post('/users', { name: data.name, email: data.email, password: data.password, role: data.role });
         toast({ title: 'User created' });
       }
-      reset();
-      setFormOpen(false);
-      setEditUser(null);
-      loadUsers();
-    } catch {
-      toast({ title: 'Failed to save user', variant: 'destructive' });
+      onSuccess();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast({ title: msg || 'Failed to save user', variant: 'destructive' });
     }
+  }
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div className="space-y-1">
+        <Label>Name *</Label>
+        <Input {...register('name')} />
+        {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+      </div>
+      <div className="space-y-1">
+        <Label>Email *</Label>
+        <Input type="email" {...register('email')} />
+        {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+      </div>
+      <div className="space-y-1">
+        <Label>Password {editUser ? '(leave blank to keep)' : '*'}</Label>
+        <Input type="password" {...register('password')} />
+        {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+      </div>
+      <div className="space-y-1">
+        <Label>Role *</Label>
+        <Select
+          defaultValue={editUser?.role ?? 'sales'}
+          onValueChange={(v) => setValue('role', v as 'admin' | 'sales' | 'warehouse')}
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="sales">Sales</SelectItem>
+            <SelectItem value="warehouse">Warehouse</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Saving...' : 'Save'}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+export function SettingsPage() {
+  const [users, setUsers] = React.useState<User[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [formOpen, setFormOpen] = React.useState(false);
+  const [editUser, setEditUser] = React.useState<User | null>(null);
+
+  async function loadUsers() {
+    setLoading(true);
+    try {
+      const res = await api.get('/users');
+      setUsers(res.data.data || []);
+    } catch {
+      toast({ title: 'Failed to load users', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => { loadUsers(); }, []);
+
+  function openCreate() {
+    setEditUser(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(user: User) {
+    setEditUser(user);
+    setFormOpen(true);
+  }
+
+  function handleClose() {
+    setFormOpen(false);
+    setEditUser(null);
+  }
+
+  function handleSuccess() {
+    handleClose();
+    loadUsers();
   }
 
   return (
     <div>
       <PageHeader title="Settings" description="Manage users and application settings">
-        <Button onClick={() => { setEditUser(null); setFormOpen(true); }}>
+        <Button onClick={openCreate}>
           <Plus className="h-4 w-4 mr-2" /> Add User
         </Button>
       </PageHeader>
@@ -85,51 +169,56 @@ export function SettingsPage() {
         columns={[
           { key: 'name', header: 'Name', sortable: true },
           { key: 'email', header: 'Email' },
-          { key: 'role', header: 'Role', accessor: (r: User) => <span className="capitalize">{r.role}</span> },
-          { key: 'is_active', header: 'Status', accessor: (r: User) => (
-            <span className={`text-xs font-medium ${r.is_active ? 'text-green-600' : 'text-muted-foreground'}`}>
-              {r.is_active ? 'Active' : 'Inactive'}
-            </span>
-          )},
-          { key: 'created_at', header: 'Created', accessor: (r: User) => formatDate(r.created_at) },
-          { key: 'actions', header: '', accessor: (r: User) => (
-            <Button variant="ghost" size="icon" onClick={() => { setEditUser(r); setFormOpen(true); }}>
-              <Edit className="h-4 w-4" />
-            </Button>
-          )},
+          {
+            key: 'role',
+            header: 'Role',
+            accessor: (r: User) => <span className="capitalize">{r.role}</span>,
+          },
+          {
+            key: 'is_active',
+            header: 'Status',
+            accessor: (r: User) => (
+              <span className={`text-xs font-medium ${r.is_active ? 'text-green-600' : 'text-muted-foreground'}`}>
+                {r.is_active ? 'Active' : 'Inactive'}
+              </span>
+            ),
+          },
+          {
+            key: 'created_at',
+            header: 'Created',
+            accessor: (r: User) => formatDate(Number(r.created_at)),
+          },
+          {
+            key: 'actions',
+            header: '',
+            accessor: (r: User) => (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => { e.stopPropagation(); openEdit(r); }}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+            ),
+          },
         ]}
         data={users}
+        loading={loading}
         emptyMessage="No users found."
       />
 
-      <Dialog open={formOpen} onOpenChange={(v) => { setFormOpen(v); if (!v) setEditUser(null); }}>
+      <Dialog open={formOpen} onOpenChange={(v) => { if (!v) handleClose(); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>{editUser ? 'Edit User' : 'Add User'}</DialogTitle></DialogHeader>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div className="space-y-1"><Label>Name *</Label><Input {...register('name')} /></div>
-            {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
-            <div className="space-y-1"><Label>Email *</Label><Input type="email" {...register('email')} /></div>
-            <div className="space-y-1">
-              <Label>Password {editUser ? '(leave blank to keep)' : '*'}</Label>
-              <Input type="password" {...register('password')} />
-              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
-            </div>
-            <div className="space-y-1">
-              <Label>Role *</Label>
-              <Select defaultValue={editUser?.role ?? 'sales'} onValueChange={(v) => setValue('role', v as 'admin' | 'sales' | 'warehouse')}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="sales">Sales</SelectItem>
-                  <SelectItem value="warehouse">Warehouse</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditUser(null); }}>Cancel</Button>
-              <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save'}</Button>
-            </DialogFooter>
-          </form>
+          <DialogHeader>
+            <DialogTitle>{editUser ? 'Edit User' : 'Add User'}</DialogTitle>
+          </DialogHeader>
+          {/* key forces full remount when switching between create/edit */}
+          <UserForm
+            key={editUser ? `edit-${editUser.id}` : 'create'}
+            editUser={editUser}
+            onSuccess={handleSuccess}
+            onCancel={handleClose}
+          />
         </DialogContent>
       </Dialog>
     </div>

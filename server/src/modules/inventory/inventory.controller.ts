@@ -10,7 +10,7 @@ export async function listProducts(req: Request, res: Response): Promise<void> {
 
 export async function getProduct(req: Request, res: Response): Promise<void> {
   const product = await inventoryService.getProductById(Number(req.params.id));
-  if (\!product) { sendError(res, 'Product not found', 404); return; }
+  if (!product) { sendError(res, 'Product not found', 404); return; }
   sendSuccess(res, product);
 }
 
@@ -50,7 +50,7 @@ export async function adjustStock(req: Request, res: Response): Promise<void> {
     const product = await inventoryService.adjustStock(
       Number(req.params.productId),
       req.body,
-      req.user\!.sub
+      req.user!.sub
     );
     sendSuccess(res, product, 'Stock adjusted');
   } catch (err: unknown) {

@@ -80,7 +80,7 @@ npm run dev --workspace=client
 npm run build
 
 # Seed the database with initial data
-cd server && npx ts-node src/db/seed.ts
+npm run seed --workspace=server
 ```
 
 ## Server Configuration

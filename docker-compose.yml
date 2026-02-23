@@ -10,6 +10,8 @@ services:
       POSTGRES_USER: crm
       POSTGRES_PASSWORD: crm_password
       POSTGRES_DB: crmdb
+    ports:
+      - "5432:5432"                   # Expose to host for local tools (pgAdmin, psql, seed script)
     volumes:
       - crm_pg_data:/var/lib/postgresql/data
     networks:
